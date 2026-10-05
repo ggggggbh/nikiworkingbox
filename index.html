@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>CricketBox</title>
+    <!-- Подключаем Telegram Web App API -->
+    <script src="https://telegram.org"></script>
+    <style>
+        /* Фикс для iOS: отключаем скролл всей страницы и выделение текста */
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background: #13141b; color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overscroll-behavior: none; user-select: none; -webkit-user-select: none;
+        }
+        .container {
+            display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+            height: 100vh; padding: 20px; box-sizing: border-box; padding-bottom: calc(20px + env(safe-area-inset-bottom));
+        }
+        .header { text-align: center; margin-top: 10px; }
+        .username { color: #f3ba2f; font-weight: bold; }
+        .stats { display: flex; gap: 20px; margin-top: 10px; background: rgba(255,255,255,0.05); padding: 10px 20px; border-radius: 12px; }
+        
+        /* Казино-барабан (Слот) */
+        .slot-machine {
+            width: 80%; max-width: 300px; height: 100px; border: 4px solid #f3ba2f;
+            border-radius: 16px; background: #1c1d26; overflow: hidden; position: relative;
+            box-shadow: 0 0 20px rgba(243, 186, 47, 0.3);
+        }
+        .slot-reels {
+            display: flex; justify-content: center; align-items: center; height: 100%;
+            font-size: 48px; font-weight: bold; transition: transform 0.5s ease;
+        }
+        .reel { width: 100%; text-align: center; }
+
+        /* Кнопки действий */
+        .buttons-container { width: 100%; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+        .btn {
+            width: 90%; max-width: 300px; padding: 16px; border: none; border-radius: 14px;
+            font-size: 18px; font-weight: 600; cursor: pointer; transition: transform 0.1s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn:active { transform: scale(0.97); }
+        .btn-spin { background: #f3ba2f; color: #13141b; }
+        .btn-stars { background: #2f80ed; color: #fff; }
+        .btn:disabled { background: #3a3b45; color: #71727a; cursor: not-allowed; }
+        
+        .win-announcement { height: 30px; font-size: 20px; color: #4cd964; font-weight: bold; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>CricketBox 🏏</h2>
+        <div id="user-info">Загрузка игрока...</div>
+        <div class="stats">
+            <div>Попытки: <span id="spins-count">0</span></div>
+            <div>Баланс TG Премиум: <span id="tgp-balance">0</span></div>
+        </div>
+    </div>
+
+    <!-- Анимационная зона казино -->
+    <div class="win-announcement" id="win-text"></div>
+    <div class="slot-machine">
+        <div class="slot-reels" id="reel-container">
+            <div class="reel" id="reel-item">🎁</div>
+        </div>
+    </div>
+
+    <div class="buttons-container">
+        <button class="btn btn-spin" id="spin-btn" onclick="triggerSpin()">Крутить бесплатно</button>
+        <button class="btn btn-stars" id="stars-btn" onclick="buySpins()">+1 Крутка за 🌟 Stars</button>
+    </div>
+</div>
+
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand(); // Расширяем на весь экран iOS
+
+    // Эмуляция локального состояния (в проде запрашивать с бэкенда)
+    let userSpins = 2; 
+    let tgpBalance = 0;
+    const SERVER_URL = "https://your-backend-api.com"; // Укажите URL вашего бэкенда
+
+    // Инициализация данных пользователя из Telegram
+    if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        const user = tg.initDataUnsafe.user;
+        document.getElementById('user-info').innerHTML = `Привет, <span class="username">@${user.username || user.first_name}</span>`;
+    } else {
+        document.getElementById('user-info').innerHTML = `<span class="username">Игрок (Режим теста)</span>`;
+    }
+
+    function updateUI() {
+        document.getElementById('spins-count').innerText = userSpins;
+        document.getElementById('tgp-balance').innerText = tgpBalance;
+        const spinBtn = document.getElementById('spin-btn');
+        if (userSpins <= 0) {
+            spinBtn.disabled = true;
+            spinBtn.innerText = "Нет бесплатных круток";
+        } else {
+            spinBtn.disabled = false;
+            spinBtn.innerText = `Крутить бесплатно (${userSpins})`;
+        }
+    }
+    updateUI();
+
+    // Логика прокрутки (анимация казино)
+    function triggerSpin() {
+        if (userSpins <= 0) return;
+        userSpins--;
+        updateUI();
+
+        const reel = document.getElementById('reel-item');
+        const winText = document.getElementById('win-text');
+        const spinBtn = document.getElementById('spin-btn');
+        
+        spinBtn.disabled = true;
+        winText.innerText = "";
+        
+        // Массив возможных призов для анимации
+        const prizes = ['🌟', '💎', '🏏', '🪙', '🎁'];
+        let counter = 0;
+        
+        // Тактильный отклик iOS: легкая вибрация при старте крутки
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+
+        // Эффект быстрого перебора («крутится барабан»)
+        const interval = setInterval(() => {
+            reel.innerText = prizes[Math.floor(Math.random() * prizes.length)];
+            // Легкое тиканье при смене символов
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+        }, 100);
+
+        // Запрос на бэкенд за реальным результатом
+        // Чтобы прототип работал автономно, ниже зашита симуляция ответа сервера через fetch
+        setTimeout(() => {
+            clearInterval(interval);
+            
+            /* В продакшене тут будет запрос:
+            fetch(`${SERVER_URL}/api/spin`, { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ initData: tg.initData }) 
+            }).then(res => res.json()).then(data => { ... })
+            */
+
+            // Симуляция выпадения приза:
+            const finalPrizes = [
+                { icon: '🌟', text: '+10 Звезд!', type: 'stars' },
+                { icon: '💎', text: 'Telegram Premium!', type: 'tgp' },
+                { icon: '🪙', text: '+500 Коинов!', type: 'coins' }
+            ];
+            const result = finalPrizes[Math.floor(Math.random() * finalPrizes.length)];
+            
+            reel.innerText = result.icon;
+            winText.innerText = result.text;
+            
+            if (result.type === 'tgp') tgpBalance++;
+            
+            // Жесткий тактильный клик на iOS при крупном выигрыше
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            
+            spinBtn.disabled = false;
+            updateUI();
+        }, 2500); // Крутим 2.5 секунды
+    }
+
+    // Покупка дополнительных круток за Telegram Stars через инвойс бэкенда
+    function buySpins() {
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('heavy');
+        
+        // Отправляем запрос на бэкенд для генерации ссылки на оплату Stars
+        fetch(`${SERVER_URL}/api/create-stars-invoice`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ initData: tg.initData })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.invoiceLink) {
+                // Открываем нативный платежный шлюз Telegram Stars на iOS
+                tg.openInvoice(data.invoiceLink, function(status) {
+                    if (status === 'paid') {
+                        userSpins += 1;
+                        tg.showAlert('Оплата успешна! Вам начислена +1 крутка.');
+                        updateUI();
+                    } else if (status === 'cancelled') {
+                        tg.showAlert('Оплата отменена.');
+                    } else {
+                        tg.showAlert('Ошибка платежа.');
+                    }
+                });
+            }
+        });
+    }
+</script>
+</body>
+</html>
